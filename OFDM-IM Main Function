@@ -1,0 +1,90 @@
+clear all;
+clc;
+
+nFFT = 128; % yapılacak fft boyutu
+nDSC = 128; % alt taşıyıcı sayısı
+nBitPerSym = 128; % her bir OFDM sembolüne karşılık bit sayısı (BPSK olduğu için her bir sembol bir bit)
+nSym = 1; % number of symbols
+nbit = 4; %Her bir grup içindeki toplam bit sayısı 
+nGroup = nBitPerSym / nbit ; %Bit dizisinin bölüneceği grup sayısı
+n = nBitPerSym*nSym; %total number of bits sent
+kbit = 2 ; %Aktif alt taşıyıcı sayısı
+%Her bir grup içindeki eleman sayısı p1=indeks bloğu ve p2=modulasyon bloğu şeklinde ikiye ayrılır.
+p=nDSC/nGroup; 
+K = kbit*(nFFT/n); 
+nTap=10;
+CP=16;
+
+monteEnd =1e6;
+SNR_range = 0:5:30;
+
+%BER = zeros(1,EbN0LooperEnd);
+BER = zeros(1,length(SNR_range));
+tic
+for looper=1:length(SNR_range)
+    berErrorMonte=0;
+for monte = 1:1:monteEnd
+    %EbN0dB=looper;
+    
+Tx_Bits = randi([0 1],1,n); %n boyutlu bit dizisi oluşturuldu.
+
+%%INDEX MODULASYONU 
+Xf = Index_Modulation(Tx_Bits,p,nGroup)';
+Xf = reshape(Xf,nSym,nBitPerSym);
+%xt = (nFFT/sqrt(nDSC))*ifft(Xf); %%gönderilen bit dizisi zaman düzlemine döndürüldü.
+xt = (nFFT/sqrt(nGroup*kbit))*ifft(Xf);
+%%%%%%
+%xt = ((nFFT/sqrt(nDSC/2))*ifft(fftshift(Xf.'))).';
+
+%%%%KANAL OLUŞTURMA
+ht = 1/sqrt(2)*1/sqrt(nTap)*(randn(nSym,nTap)+j* randn(nSym,nTap)); %Rayleigh kanal katsayıları 
+Hf = fft(ht,nFFT); %Kanal katsayılarının frekans düzlemine geçişi
+%%%%%
+
+%%%%CYCLIC PREFIX EKLEME
+xt = [xt(1,[nFFT-CP+1:nFFT]) xt];
+
+%%%%%GÖNDERİCİ 
+yt_long = conv(xt,ht);
+%yt=Conv_Theorem(yt_long,Hf,Xf);
+yt=yt_long(1,1:nFFT+CP);
+
+%%%%%GÜRÜLTÜ 
+nt_length = length(xt);
+nt = 1/sqrt(2)*(randn(1,nt_length) + j*randn(1,nt_length)); % white gaussian noise, 0dB variance 
+%nt = 10^(-EbN0dB/20)*nt;
+nt = 10^(-SNR_range(looper)/20)*nt;
+ynt = yt + nt;
+
+%%%%CYCLIC PREFIX ÇIKARMA
+ynt = ynt(1,CP+1:CP+nFFT);
+Yf = (sqrt(nGroup*kbit)/nFFT)*fft(ynt,nFFT);
+
+%%Alıcı Kısmı
+Rx_Bits = Index_Demodulation(Yf,Hf,p,nGroup);
+Rx_Bits = reshape(Rx_Bits,nSym,nBitPerSym);
+
+[Num1(monte),Rat1(monte)] = biterr(Tx_Bits,Rx_Bits);
+
+% berError=Num1(looper);
+% berErrorMonte = berErrorMonte +(berError/(nSym*n));
+end
+
+% BER(looper)=berErrorMonte/monteEnd;
+% BER_Plot(looper) = BER(looper);
+    BER(looper)=mean(Rat1);
+    clear Rat1;
+end
+toc
+
+%semilogy(BER_Plot,'Color',[0 0 0 1],'LineWidth',2,'LineStyle','-','Marker','*','MarkerSize',2);
+semilogy(SNR_range,BER,'Color',[0 0 0 1],'LineWidth',3,'LineStyle','-','Marker','+','MarkerSize',5);
+xlabel('Eb /N0 (dB)');
+ylabel('BER');
+legend('OFDM-IM(2,4) BPSK');
+title('OFDM-IM BER GRAFİĞİ');
+grid on;
+hold on;
+
+
+
